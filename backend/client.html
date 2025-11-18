@@ -6,7 +6,7 @@
 </head>
 <body>
   <h2>Chat Room</h2>
-  <textarea id="c" cols="50" rows="15" readonly></textarea><br>
+  <div id="c" style="width:400px;height:240px;border:1px solid #ccc;overflow:auto;padding:8px"></div>
   <input type="text" id="m" placeholder="Type message..." />
   <button onclick="send()">Send</button>
 
@@ -15,12 +15,57 @@
     const m = document.getElementById("m");
     const ws = new WebSocket("ws://localhost:6789");
 
-    ws.onmessage = e => c.value += e.data + "\n";
+    // maintain a mapping of message id -> element so deletions are easy
+    const msgMap = new Map();
+
+    function addMessage(id, text) {
+      const el = document.createElement('div');
+      el.id = 'm-' + id;
+      el.textContent = `[${id}] ${text}`;
+      el.style.padding = '4px 0';
+      c.appendChild(el);
+      msgMap.set(id, el);
+      // auto-scroll
+      c.scrollTop = c.scrollHeight;
+    }
+
+    function removeMessage(id) {
+      const el = msgMap.get(id);
+      if (el) {
+        el.remove();
+        msgMap.delete(id);
+      }
+    }
+
+    ws.onmessage = e => {
+      let obj;
+      try {
+        obj = JSON.parse(e.data);
+      } catch (err) {
+        // fall back to plain text
+        const el = document.createElement('div');
+        el.textContent = e.data;
+        c.appendChild(el);
+        return;
+      }
+
+      if (obj.type === 'init') {
+        c.innerHTML = '';
+        msgMap.clear();
+        for (const m of obj.messages) {
+          addMessage(m.id, m.text);
+        }
+      } else if (obj.type === 'message') {
+        addMessage(obj.id, obj.text);
+      } else if (obj.type === 'delete') {
+        removeMessage(obj.id);
+      }
+    };
 
     function send() {
-      const txt = m.value;
+      const txt = m.value.trim();
+      if (!txt) return;
       ws.send(txt);
-      c.value += "<You>: " + txt + "\n";
       m.value = "";
     }
   </script>
