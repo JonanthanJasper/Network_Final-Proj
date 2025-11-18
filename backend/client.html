@@ -21,8 +21,24 @@
     function addMessage(id, text) {
       const el = document.createElement('div');
       el.id = 'm-' + id;
-      el.textContent = `[${id}] ${text}`;
+      el.style.display = 'flex';
+      el.style.justifyContent = 'space-between';
+      el.style.alignItems = 'center';
       el.style.padding = '4px 0';
+
+      const txt = document.createElement('span');
+      txt.textContent = `[${id}] ${text}`;
+
+      const btn = document.createElement('button');
+      btn.textContent = 'Delete';
+      btn.style.marginLeft = '8px';
+      btn.onclick = () => {
+        // send delete command for this id
+        ws.send(`/delete ${id}`);
+      };
+
+      el.appendChild(txt);
+      el.appendChild(btn);
       c.appendChild(el);
       msgMap.set(id, el);
       // auto-scroll
