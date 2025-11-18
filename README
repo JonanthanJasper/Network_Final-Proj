@@ -1,0 +1,5 @@
+This is a simple python project to make a small messaging application
+
+Two Componets:
+* Server side to connect users and maintain records of communication
+* Client Side connect to server and send messages to server
