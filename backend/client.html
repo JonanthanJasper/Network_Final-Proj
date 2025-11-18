@@ -11,9 +11,11 @@
   <button onclick="send()">Send</button>
 
   <script>
-    const c = document.getElementById("c");
-    const m = document.getElementById("m");
-    const ws = new WebSocket("ws://localhost:6789");
+  const c = document.getElementById("c");
+  const m = document.getElementById("m");
+  const host = location.hostname || 'localhost';
+  const port = 6789;
+  const ws = new WebSocket(`ws://${host}:${port}`);
 
     // maintain a mapping of message id -> element so deletions are easy
     const msgMap = new Map();

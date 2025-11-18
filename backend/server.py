@@ -1,21 +1,46 @@
+"""Simple websocket chat server (no argparse).
+
+Use this file if you prefer not to use argparse. It binds to 0.0.0.0:6789 by default.
+"""
+
 import asyncio
 import json
+import logging
 import websockets
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 clients = set()
 messages = []  # list of {'id': int, 'text': str}
 next_id = 1
 
+
+async def broadcast(payload):
+    if isinstance(payload, (dict, list)):
+        data = json.dumps(payload)
+    else:
+        data = str(payload)
+
+    if not clients:
+        return
+
+    coros = [c.send(data) for c in list(clients)]
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    for c, res in zip(list(clients), results):
+        if isinstance(res, Exception):
+            logging.info("Removing dead client: %s", getattr(c, 'remote_address', str(c)))
+            clients.discard(c)
+
+
 async def handle(ws):
     global next_id
     clients.add(ws)
+    logging.info("Client connected (%d total)", len(clients))
     try:
-        # send existing history to the new client
-        init_payload = json.dumps({"type": "init", "messages": messages})
-        await ws.send(init_payload)
+        await ws.send(json.dumps({"type": "init", "messages": messages}))
 
         async for msg in ws:
-            # simple command protocol: /delete <id> or /delete last
             if isinstance(msg, str) and msg.startswith("/delete "):
                 arg = msg[len("/delete "):].strip()
                 if arg == "last":
@@ -26,37 +51,34 @@ async def handle(ws):
                     try:
                         target_id = int(arg)
                     except ValueError:
-                        # invalid id, ignore
                         continue
 
-                # find and remove message with target_id
                 for i, m in enumerate(messages):
                     if m["id"] == target_id:
                         del messages[i]
-                        payload = json.dumps({"type": "delete", "id": target_id})
-                        # broadcast delete to all clients
-                        await asyncio.gather(*[c.send(payload) for c in clients])
+                        await broadcast({"type": "delete", "id": target_id})
                         break
                 continue
 
-            # normal message: assign id, store and broadcast
             mid = next_id
             next_id += 1
             messages.append({"id": mid, "text": msg})
-            payload = json.dumps({"type": "message", "id": mid, "text": msg})
-            # broadcast to all clients (including sender) so UIs stay consistent
-            await asyncio.gather(*[c.send(payload) for c in clients])
+            await broadcast({"type": "message", "id": mid, "text": msg})
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
-        clients.remove(ws)
+        clients.discard(ws)
+        logging.info("Client disconnected (%d total)", len(clients))
 
 
-async def main():
-    async with websockets.serve(handle, "localhost", 6789):
-        print("Server running at ws://localhost:6789")
-        await asyncio.Future()  # Run forever
+async def main(host: str = "0.0.0.0", port: int = 6789):
+    async with websockets.serve(handle, host, port):
+        logging.info("Server running at ws://%s:%d", host, port)
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Server shutting down")
