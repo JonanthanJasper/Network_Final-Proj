@@ -9,6 +9,7 @@ import logging
 import websockets
 import uuid
 import random
+import time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -18,6 +19,7 @@ id_to_ws = {}
 
 messages = []  # list of {'id': int, 'text': str, 'reply_to': Optional[int], 'from_id': str, 'from_name': str, 'to_id': Optional[str]}
 next_id = 1
+temp_tasks = {}  # mid -> asyncio.Task
 
 
 async def broadcast(payload):
@@ -78,6 +80,10 @@ async def handle(ws):
                 for i, m in enumerate(messages):
                     if m["id"] == target_id:
                         del messages[i]
+                        # cancel any temp task
+                        t = temp_tasks.pop(target_id, None)
+                        if t:
+                            t.cancel()
                         await broadcast({"type": "delete", "id": target_id})
                         break
                 continue
@@ -98,6 +104,42 @@ async def handle(ws):
                 next_id += 1
                 messages.append({"id": mid, "text": text, "reply_to": reply_to, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None})
                 await broadcast({"type": "message", "id": mid, "text": text, "reply_to": reply_to, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None})
+                continue
+
+            # /temp <seconds> <text> -- temporary public message
+            if isinstance(msg, str) and msg.startswith('/temp '):
+                rest = msg[len('/temp '):].strip()
+                parts = rest.split(' ', 1)
+                if len(parts) != 2:
+                    continue
+                try:
+                    ttl = int(parts[0])
+                except ValueError:
+                    continue
+                text = parts[1]
+                sender = clients_info.get(ws, {'id': None, 'name': None})
+                mid = next_id
+                next_id += 1
+                expires_at = time.time() + ttl
+                messages.append({"id": mid, "text": text, "reply_to": None, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None, 'expires_at': expires_at})
+                await broadcast({"type": "message", "id": mid, "text": text, "reply_to": None, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None, 'expires_at': expires_at})
+
+                # schedule deletion
+                async def expire(mid_local, delay):
+                    try:
+                        await asyncio.sleep(delay)
+                        # remove message if still present
+                        for i, m in enumerate(messages):
+                            if m['id'] == mid_local:
+                                del messages[i]
+                                temp_tasks.pop(mid_local, None)
+                                await broadcast({"type": "delete", "id": mid_local})
+                                break
+                    except asyncio.CancelledError:
+                        return
+
+                task = asyncio.create_task(expire(mid, ttl))
+                temp_tasks[mid] = task
                 continue
 
             # /to <client_id> <text>  -> direct message to another client

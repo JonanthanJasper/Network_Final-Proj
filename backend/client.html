@@ -33,11 +33,12 @@
   // keep message text by id to render replies
   const textMap = new Map();
 
-    function addMessage(id, text, reply_to) {
+  function addMessage(id, text, reply_to) {
       // enhanced display: show sender/recipient if present
       const fromId = arguments[3];
       const fromName = arguments[4];
-      const toId = arguments[5];
+  const toId = arguments[5];
+  const expiresAt = arguments[6];
       const el = document.createElement('div');
       el.id = 'm-' + id;
       el.style.display = 'flex';
@@ -95,6 +96,16 @@
         dm.style.color = '#900';
         dm.textContent = `(direct to ${toId})`;
         left.appendChild(dm);
+      }
+
+      // if message expires, show expiry timestamp
+      if (expiresAt) {
+        const ex = document.createElement('div');
+        ex.style.fontSize = '0.8em';
+        ex.style.color = '#666';
+        const d = new Date(expiresAt * 1000);
+        ex.textContent = `(expires at ${d.toLocaleTimeString()})`;
+        left.appendChild(ex);
       }
 
       const actions = document.createElement('div');

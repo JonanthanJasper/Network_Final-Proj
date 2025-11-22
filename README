@@ -21,6 +21,10 @@ Commands supported by the backend (client sends these as plain text over the web
 	- On success the server broadcasts `{ "type": "delete", "id": <id> }` to all connected clients.
 - `/reply <id> <text>` — create a new message that is a reply to message `<id>`. The server assigns an id and broadcasts
 	`{ "type": "message", "id": <new id>, "text": "<text>", "reply_to": <id> }`.
+ - `/temp <seconds> <text>` — create a temporary public message that will automatically be deleted after <seconds> seconds. The server
+   includes an `expires_at` (epoch seconds) field in the broadcasted message so clients can display expiry info. When the message expires the server
+   broadcasts `{ "type": "delete", "id": <id> }`.
+ - `/to <client_id> <text>` — send a direct message to the client identified by `<client_id>` (use the client list shown in the UI to pick an id).
 
 Normal messages (not starting with `/`) are stored and broadcast as `{ "type": "message", "id": <id>, "text": "<text>", "reply_to": null }`.
 
