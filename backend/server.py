@@ -11,7 +11,7 @@ import websockets
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 clients = set()
-messages = []  # list of {'id': int, 'text': str}
+messages = []  # list of {'id': int, 'text': str, 'reply_to': Optional[int]}
 next_id = 1
 
 
@@ -41,6 +41,7 @@ async def handle(ws):
         await ws.send(json.dumps({"type": "init", "messages": messages}))
 
         async for msg in ws:
+            # /delete command
             if isinstance(msg, str) and msg.startswith("/delete "):
                 arg = msg[len("/delete "):].strip()
                 if arg == "last":
@@ -60,10 +61,29 @@ async def handle(ws):
                         break
                 continue
 
+            # /reply <id> <text>
+            if isinstance(msg, str) and msg.startswith("/reply "):
+                rest = msg[len("/reply "):].strip()
+                parts = rest.split(" ", 1)
+                if len(parts) != 2:
+                    continue
+                try:
+                    reply_to = int(parts[0])
+                except ValueError:
+                    continue
+                text = parts[1]
+
+                mid = next_id
+                next_id += 1
+                messages.append({"id": mid, "text": text, "reply_to": reply_to})
+                await broadcast({"type": "message", "id": mid, "text": text, "reply_to": reply_to})
+                continue
+
+            # normal message
             mid = next_id
             next_id += 1
-            messages.append({"id": mid, "text": msg})
-            await broadcast({"type": "message", "id": mid, "text": msg})
+            messages.append({"id": mid, "text": msg, "reply_to": None})
+            await broadcast({"type": "message", "id": mid, "text": msg, "reply_to": None})
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

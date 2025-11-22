@@ -17,10 +17,12 @@
   const port = 6789;
   const ws = new WebSocket(`ws://${host}:${port}`);
 
-    // maintain a mapping of message id -> element so deletions are easy
-    const msgMap = new Map();
+  // maintain a mapping of message id -> element so deletions are easy
+  const msgMap = new Map();
+  // keep message text by id to render replies
+  const textMap = new Map();
 
-    function addMessage(id, text) {
+    function addMessage(id, text, reply_to) {
       const el = document.createElement('div');
       el.id = 'm-' + id;
       el.style.display = 'flex';
@@ -28,21 +30,58 @@
       el.style.alignItems = 'center';
       el.style.padding = '4px 0';
 
-      const txt = document.createElement('span');
-      txt.textContent = `[${id}] ${text}`;
+      const left = document.createElement('div');
+      left.style.display = 'flex';
+      left.style.flexDirection = 'column';
 
-      const btn = document.createElement('button');
-      btn.textContent = 'Delete';
-      btn.style.marginLeft = '8px';
-      btn.onclick = () => {
-        // send delete command for this id
-        ws.send(`/delete ${id}`);
+      const meta = document.createElement('span');
+      meta.textContent = `[${id}]`;
+      meta.style.fontWeight = '600';
+
+      const txt = document.createElement('span');
+      txt.textContent = text;
+
+      left.appendChild(meta);
+
+      // if this message is a reply, show a small quoted preview
+      if (reply_to != null) {
+        const preview = document.createElement('div');
+        preview.style.fontSize = '0.85em';
+        preview.style.color = '#555';
+        preview.style.borderLeft = '2px solid #ddd';
+        preview.style.paddingLeft = '6px';
+        preview.style.marginBottom = '4px';
+        const orig = textMap.get(reply_to);
+        preview.textContent = `↪ Reply to [${reply_to}]: ${orig ?? '(deleted)'}`;
+        left.appendChild(preview);
+      }
+
+      left.appendChild(txt);
+
+      const actions = document.createElement('div');
+      actions.style.display = 'flex';
+      actions.style.gap = '6px';
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Delete';
+      delBtn.onclick = () => ws.send(`/delete ${id}`);
+
+      const replyBtn = document.createElement('button');
+      replyBtn.textContent = 'Reply';
+      replyBtn.onclick = () => {
+        // prefill reply command
+        m.value = `/reply ${id} `;
+        m.focus();
       };
 
-      el.appendChild(txt);
-      el.appendChild(btn);
+      actions.appendChild(replyBtn);
+      actions.appendChild(delBtn);
+
+      el.appendChild(left);
+      el.appendChild(actions);
       c.appendChild(el);
       msgMap.set(id, el);
+      textMap.set(id, text);
       // auto-scroll
       c.scrollTop = c.scrollHeight;
     }
@@ -52,6 +91,7 @@
       if (el) {
         el.remove();
         msgMap.delete(id);
+        textMap.delete(id);
       }
     }
 
@@ -70,11 +110,12 @@
       if (obj.type === 'init') {
         c.innerHTML = '';
         msgMap.clear();
+        textMap.clear();
         for (const m of obj.messages) {
-          addMessage(m.id, m.text);
+          addMessage(m.id, m.text, m.reply_to ?? null);
         }
       } else if (obj.type === 'message') {
-        addMessage(obj.id, obj.text);
+        addMessage(obj.id, obj.text, obj.reply_to ?? null);
       } else if (obj.type === 'delete') {
         removeMessage(obj.id);
       }
