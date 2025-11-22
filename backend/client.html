@@ -6,13 +6,24 @@
 </head>
 <body>
   <h2>Chat Room</h2>
-  <div id="c" style="width:400px;height:240px;border:1px solid #ccc;overflow:auto;padding:8px"></div>
-  <input type="text" id="m" placeholder="Type message..." />
-  <button onclick="send()">Send</button>
+  <div style="display:flex;gap:12px">
+    <div style="width:240px">
+      <div><strong>Your ID:</strong> <span id="myid">(connecting...)</span></div>
+      <h4>Clients</h4>
+      <div id="clients" style="height:120px;overflow:auto;border:1px solid #ddd;padding:4px"></div>
+    </div>
+    <div style="flex:1">
+      <div id="c" style="width:100%;height:240px;border:1px solid #ccc;overflow:auto;padding:8px"></div>
+      <input type="text" id="m" placeholder="Type message..." style="width:70%" />
+      <button onclick="send()">Send</button>
+    </div>
+  </div>
 
   <script>
   const c = document.getElementById("c");
   const m = document.getElementById("m");
+  const myidSpan = document.getElementById('myid');
+  const clientsDiv = document.getElementById('clients');
   const host = location.hostname || 'localhost';
   const port = 6789;
   const ws = new WebSocket(`ws://${host}:${port}`);
@@ -23,6 +34,10 @@
   const textMap = new Map();
 
     function addMessage(id, text, reply_to) {
+      // enhanced display: show sender/recipient if present
+      const fromId = arguments[3];
+      const fromName = arguments[4];
+      const toId = arguments[5];
       const el = document.createElement('div');
       el.id = 'm-' + id;
       el.style.display = 'flex';
@@ -36,12 +51,27 @@
 
       const meta = document.createElement('span');
       meta.textContent = `[${id}]`;
+      meta.style.marginRight = '8px';
+
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.alignItems = 'center';
+
+      // show sender
+      if (fromId) {
+        const from = document.createElement('small');
+        from.style.marginRight = '8px';
+        from.textContent = `${fromName} (${fromId})`;
+        header.appendChild(from);
+      }
+
+      header.appendChild(meta);
       meta.style.fontWeight = '600';
 
       const txt = document.createElement('span');
       txt.textContent = text;
 
-      left.appendChild(meta);
+  left.appendChild(header);
 
       // if this message is a reply, show a small quoted preview
       if (reply_to != null) {
@@ -57,6 +87,15 @@
       }
 
       left.appendChild(txt);
+
+      // if message was direct to someone, show marker
+      if (toId) {
+        const dm = document.createElement('div');
+        dm.style.fontSize = '0.85em';
+        dm.style.color = '#900';
+        dm.textContent = `(direct to ${toId})`;
+        left.appendChild(dm);
+      }
 
       const actions = document.createElement('div');
       actions.style.display = 'flex';
@@ -74,8 +113,8 @@
         m.focus();
       };
 
-      actions.appendChild(replyBtn);
-      actions.appendChild(delBtn);
+  actions.appendChild(replyBtn);
+  actions.appendChild(delBtn);
 
       el.appendChild(left);
       el.appendChild(actions);
@@ -95,6 +134,23 @@
       }
     }
 
+    let myId = null;
+
+    function renderClients(list) {
+      clientsDiv.innerHTML = '';
+      for (const cli of list) {
+        const btn = document.createElement('div');
+        btn.style.padding = '4px';
+        btn.style.cursor = 'pointer';
+        btn.textContent = `${cli.name} — ${cli.id}`;
+        btn.onclick = () => {
+          m.value = `/to ${cli.id} `;
+          m.focus();
+        };
+        clientsDiv.appendChild(btn);
+      }
+    }
+
     ws.onmessage = e => {
       let obj;
       try {
@@ -108,14 +164,22 @@
       }
 
       if (obj.type === 'init') {
+        // set own id/name
+        if (obj.you) {
+          myId = obj.you.id;
+          myidSpan.textContent = `${obj.you.name} — ${obj.you.id}`;
+        }
         c.innerHTML = '';
         msgMap.clear();
         textMap.clear();
-        for (const m of obj.messages) {
-          addMessage(m.id, m.text, m.reply_to ?? null);
+        for (const mm of obj.messages) {
+          addMessage(mm.id, mm.text, mm.reply_to ?? null, mm.from_id, mm.from_name, mm.to_id);
         }
+        if (obj.clients) renderClients(obj.clients);
+      } else if (obj.type === 'clients') {
+        renderClients(obj.clients || []);
       } else if (obj.type === 'message') {
-        addMessage(obj.id, obj.text, obj.reply_to ?? null);
+        addMessage(obj.id, obj.text, obj.reply_to ?? null, obj.from_id, obj.from_name, obj.to_id);
       } else if (obj.type === 'delete') {
         removeMessage(obj.id);
       }

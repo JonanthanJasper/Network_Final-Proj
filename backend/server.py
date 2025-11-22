@@ -7,11 +7,16 @@ import asyncio
 import json
 import logging
 import websockets
+import uuid
+import random
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 clients = set()
-messages = []  # list of {'id': int, 'text': str, 'reply_to': Optional[int]}
+clients_info = {}  # websocket -> {'id': str, 'name': str}
+id_to_ws = {}
+
+messages = []  # list of {'id': int, 'text': str, 'reply_to': Optional[int], 'from_id': str, 'from_name': str, 'to_id': Optional[str]}
 next_id = 1
 
 
@@ -31,14 +36,30 @@ async def broadcast(payload):
         if isinstance(res, Exception):
             logging.info("Removing dead client: %s", getattr(c, 'remote_address', str(c)))
             clients.discard(c)
+            # cleanup client info
+            if c in clients_info:
+                cid = clients_info[c]['id']
+                id_to_ws.pop(cid, None)
+                clients_info.pop(c, None)
+                # notify remaining clients of updated client list
+                await broadcast_clients()
 
 
 async def handle(ws):
     global next_id
     clients.add(ws)
-    logging.info("Client connected (%d total)", len(clients))
+    # assign an id and name for this client
+    short = uuid.uuid4().hex[:6]
+    name = f"User{random.randint(100,999)}"
+    client_id = f"{name}-{short}"
+    clients_info[ws] = {'id': client_id, 'name': name}
+    id_to_ws[client_id] = ws
+    logging.info("Client %s connected (%d total)", client_id, len(clients))
     try:
-        await ws.send(json.dumps({"type": "init", "messages": messages}))
+        # send initial state including assigned id and current clients
+        await ws.send(json.dumps({"type": "init", "you": clients_info[ws], "messages": messages, "clients": list(clients_info.values())}))
+        # broadcast updated clients to all
+        await broadcast_clients()
 
         async for msg in ws:
             # /delete command
@@ -72,23 +93,57 @@ async def handle(ws):
                 except ValueError:
                     continue
                 text = parts[1]
-
+                sender = clients_info.get(ws, {'id': None, 'name': None})
                 mid = next_id
                 next_id += 1
-                messages.append({"id": mid, "text": text, "reply_to": reply_to})
-                await broadcast({"type": "message", "id": mid, "text": text, "reply_to": reply_to})
+                messages.append({"id": mid, "text": text, "reply_to": reply_to, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None})
+                await broadcast({"type": "message", "id": mid, "text": text, "reply_to": reply_to, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None})
                 continue
 
-            # normal message
+            # /to <client_id> <text>  -> direct message to another client
+            if isinstance(msg, str) and msg.startswith("/to "):
+                rest = msg[len("/to "):].strip()
+                parts = rest.split(" ", 1)
+                if len(parts) != 2:
+                    continue
+                target_cid, text = parts[0], parts[1]
+                target_ws = id_to_ws.get(target_cid)
+                sender = clients_info.get(ws, {'id': None, 'name': None})
+                mid = next_id
+                next_id += 1
+                messages.append({"id": mid, "text": text, "reply_to": None, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': target_cid})
+                payload = {"type": "message", "id": mid, "text": text, "reply_to": None, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': target_cid}
+                # send to target and sender only
+                send_to = []
+                if target_ws in clients:
+                    send_to.append(target_ws)
+                send_to.append(ws)
+                coros = [c.send(json.dumps(payload)) for c in send_to]
+                await asyncio.gather(*coros, return_exceptions=True)
+                continue
+
+            # normal public message
+            sender = clients_info.get(ws, {'id': None, 'name': None})
             mid = next_id
             next_id += 1
-            messages.append({"id": mid, "text": msg, "reply_to": None})
-            await broadcast({"type": "message", "id": mid, "text": msg, "reply_to": None})
+            messages.append({"id": mid, "text": msg, "reply_to": None, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None})
+            await broadcast({"type": "message", "id": mid, "text": msg, "reply_to": None, 'from_id': sender['id'], 'from_name': sender['name'], 'to_id': None})
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
         clients.discard(ws)
+        # cleanup client info
+        info = clients_info.pop(ws, None)
+        if info:
+            id_to_ws.pop(info['id'], None)
         logging.info("Client disconnected (%d total)", len(clients))
+        await broadcast_clients()
+
+
+async def broadcast_clients():
+    """Send the current client list to all connected clients."""
+    lst = list(clients_info.values())
+    await broadcast({"type": "clients", "clients": lst})
 
 
 async def main(host: str = "0.0.0.0", port: int = 6789):
