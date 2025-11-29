@@ -164,6 +164,18 @@ async def handle(ws):
                 await asyncio.gather(*coros, return_exceptions=True)
                 continue
 
+            # /exit command: client requests to disconnect
+            if isinstance(msg, str) and msg.strip() == "/exit":
+                sender = clients_info.get(ws, {'id': None})
+                logging.info("Client %s requested exit", sender.get('id'))
+                # close the websocket; the finally block below will handle cleanup and broadcast
+                try:
+                    await ws.close()
+                except Exception:
+                    # ignore errors closing the socket; connection cleanup will follow
+                    pass
+                break
+
             # normal public message
             sender = clients_info.get(ws, {'id': None, 'name': None})
             mid = next_id
