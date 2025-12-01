@@ -9,7 +9,7 @@ Backend quick reference
 
 Files:
 - `backend/server.py` — websocket server implementation (no argparse). Binds to 0.0.0.0:6789 by default.
-- `backend/client.html` — minimal browser client that connects to the server and renders messages.
+- `backend/client.py` — minimal python client that connects to the server renders messages, sends messages, and sends commands.
 
 Message model (in-memory): each message is an object with:
 - `id` (int): unique incremental id assigned by the server
@@ -25,6 +25,7 @@ Commands supported by the backend (client sends these as plain text over the web
    includes an `expires_at` (epoch seconds) field in the broadcasted message so clients can display expiry info. When the message expires the server
    broadcasts `{ "type": "delete", "id": <id> }`.
  - `/to <client_id> <text>` — send a direct message to the client identified by `<client_id>` (use the client list shown in the UI to pick an id).
+ - '/exit' disconnect to server and give up given user name
 
 Normal messages (not starting with `/`) are stored and broadcast as `{ "type": "message", "id": <id>, "text": "<text>", "reply_to": null }`.
 
@@ -46,10 +47,9 @@ python3 -m pip install websockets
 python3 backend/server.py
 ```
 
-3. Open `backend/client.html` in one or more browsers (or serve it from a static server) to connect to the running server. Use the input box to send messages. To reply or delete messages, either type the command directly (e.g. `/reply 1 Thanks`) or use the UI Reply/Delete buttons added to each message.
+3. Open `front/client.py` in one or more times (or serve it from a static server) to connect to the running server. Use the input box to send messages. To reply or delete messages, either type the command directly (e.g. `/reply 1 Thanks`).
 
 Notes and limitations
 ---------------------
 - Storage is in-memory only; restarting the server clears history.
-- There is no authentication or ownership checking: any connected client can delete any message. If you want per-author delete permissions, I can add an `author` field and enforce delete rules.
-- The protocol is deliberately simple (plain-text commands + JSON events). If you want a structured JSON request/response protocol, I can change the server and client to use JSON for all requests.
+- There is no authentication or ownership checking: any connected client can delete any message.
